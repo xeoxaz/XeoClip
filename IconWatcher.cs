@@ -11,12 +11,20 @@ namespace XeoClip
 		private readonly FFmpegManager ffmpegManager;
 		private Thread? watcherThread;
 		private volatile bool isWatching;
+		private readonly string timestampDir;
 
 		public IconWatcher(string baseDirectory, FFmpegManager ffmpegManager)
 		{
 			// Ensure icons folder exists
 			iconsPath = Path.Combine(baseDirectory, "icons");
 			this.ffmpegManager = ffmpegManager;
+			this.timestampDir = baseDirectory;
+
+			if (!Directory.Exists(iconsPath))
+			{
+				Directory.CreateDirectory(iconsPath);
+				Console.WriteLine($"Icons directory created: {iconsPath}");
+			}
 		}
 
 		public void StartWatching()
@@ -24,6 +32,14 @@ namespace XeoClip
 			if (isWatching)
 			{
 				Console.WriteLine("IconWatcher is already running.");
+				return;
+			}
+
+			// Load icons and check if any are present
+			var icons = LoadIcons();
+			if (icons.Length == 0)
+			{
+				Console.WriteLine("No icons found in the icons folder. IconWatcher will not run.");
 				return;
 			}
 
@@ -41,13 +57,6 @@ namespace XeoClip
 						return;
 					}
 
-					var icons = LoadIcons();
-					if (icons.Length == 0)
-					{
-						Console.WriteLine("No icons found in the icons folder. IconWatcher will stop.");
-						return;
-					}
-
 					while (isWatching)
 					{
 						try
@@ -55,7 +64,7 @@ namespace XeoClip
 							if (TryDetectIcons(capture, icons, out double timestamp))
 							{
 								Console.WriteLine($"Icon detected at {timestamp:F2} seconds. Clipping video...");
-								ffmpegManager.ClipVideo(timestamp - 5, timestamp + 5);
+								ffmpegManager.ClipVideo(timestamp - 5, timestamp + 5, timestampDir);
 							}
 						}
 						catch (Exception ex)

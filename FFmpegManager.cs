@@ -9,26 +9,16 @@ namespace XeoClip
 	{
 		private Process? ffmpegProcess;
 		private DateTime? startTime;
-		private string? videoFile;
+		private string? videoFilePath;
 		private Thread? recordingThread;
-		private readonly string recordingsFolder;
-		private readonly string ffmpegPath;
+		private readonly string baseDirectory;
 
 		public FFmpegManager(string baseDirectory)
 		{
-			// Ensure the recordings folder exists
-			recordingsFolder = Path.Combine(baseDirectory, "recordings");
-			Directory.CreateDirectory(recordingsFolder);
-
-			// Ensure FFmpeg is installed and accessible
-			ffmpegPath = "ffmpeg"; // Default to "ffmpeg", adjust if installed in a custom path
-			if (!IsFFmpegAvailable())
-			{
-				throw new FileNotFoundException("FFmpeg executable not found. Please ensure FFmpeg is installed and added to the system PATH.");
-			}
+			this.baseDirectory = baseDirectory;
 		}
 
-		public void StartRecording()
+		public void StartRecording(string timestampDir)
 		{
 			if (ffmpegProcess != null)
 			{
@@ -39,10 +29,11 @@ namespace XeoClip
 			Console.WriteLine("Starting video recording...");
 			Console.Beep(1000, 500);
 
-			videoFile = GenerateOutputFileName("video", "mp4");
+			// Generate the video file path in the timestamped directory
+			videoFilePath = GenerateOutputFileName(timestampDir, "video", "mp4");
 			startTime = DateTime.Now;
 
-			string ffmpegCommand = GetFFmpegCommand(videoFile);
+			string ffmpegCommand = GetFFmpegCommand(videoFilePath);
 
 			recordingThread = new Thread(() =>
 			{
@@ -78,14 +69,13 @@ namespace XeoClip
 				ffmpegProcess.StandardInput.WriteLine("q");
 				ffmpegProcess.StandardInput.Flush();
 
-				// Wait for FFmpeg to exit naturally
 				if (!ffmpegProcess.WaitForExit(3000))
 				{
 					Console.WriteLine("Forcing video recording shutdown...");
 					ffmpegProcess.Kill();
 				}
 
-				Console.WriteLine($"Video saved to: {videoFile}");
+				Console.WriteLine($"Video saved to: {videoFilePath}");
 			}
 			catch (Exception ex)
 			{
@@ -97,21 +87,55 @@ namespace XeoClip
 			}
 		}
 
-		public void MergeAudioAndVideo(string audioFile)
+		public void ClipVideo(double startTimeInSeconds, double endTimeInSeconds, string timestampDir)
 		{
-			if (string.IsNullOrEmpty(videoFile))
+			if (string.IsNullOrEmpty(videoFilePath) || !File.Exists(videoFilePath))
+			{
+				Console.WriteLine("No video file found to clip.");
+				return;
+			}
+
+			string outputFilePath = GenerateOutputFileName(timestampDir, "clip", "mp4");
+			string clipCommand = $"{GetFFmpegPath()} -i \"{videoFilePath}\" -ss {startTimeInSeconds} -to {endTimeInSeconds} -c:v copy -c:a copy \"{outputFilePath}\"";
+
+			Console.WriteLine($"Clipping video from {startTimeInSeconds} to {endTimeInSeconds} seconds...");
+			Process ffmpegProcess = RunFFmpeg(clipCommand);
+
+			if (ffmpegProcess != null)
+			{
+				string errorOutput = ffmpegProcess.StandardError.ReadToEnd();
+				ffmpegProcess.WaitForExit();
+
+				if (ffmpegProcess.ExitCode != 0)
+				{
+					Console.WriteLine($"FFmpeg Error: {errorOutput}");
+				}
+				else
+				{
+					Console.WriteLine($"Clipped video saved to: {outputFilePath}");
+				}
+			}
+		}
+
+		public void MergeAudioAndVideo(string audioFilePath, string outputDir)
+		{
+			if (string.IsNullOrEmpty(videoFilePath))
 			{
 				Console.WriteLine("No video file found to merge.");
 				return;
 			}
-			if (string.IsNullOrEmpty(audioFile) || !File.Exists(audioFile))
+
+			if (string.IsNullOrEmpty(audioFilePath) || !File.Exists(audioFilePath))
 			{
 				Console.WriteLine("Audio file is missing or invalid.");
 				return;
 			}
 
-			string outputFile = GenerateOutputFileName("final", "mp4");
-			string mergeCommand = $"{ffmpegPath} -i \"{Path.Combine(recordingsFolder, videoFile)}\" -i \"{audioFile}\" -c:v copy -c:a aac \"{outputFile}\"";
+			// Generate the merged file path
+			string outputFilePath = GenerateOutputFileName(outputDir, "merged", "mp4");
+
+			// FFmpeg command to merge video and audio
+			string mergeCommand = $"{GetFFmpegPath()} -i \"{videoFilePath}\" -i \"{audioFilePath}\" -c:v copy -c:a aac \"{outputFilePath}\"";
 
 			Console.WriteLine("Merging video and audio...");
 			Process ffmpegProcess = RunFFmpeg(mergeCommand);
@@ -127,45 +151,19 @@ namespace XeoClip
 				}
 				else
 				{
-					Console.WriteLine($"Merged file saved to: {outputFile}");
-				}
-			}
-		}
-
-		public void ClipVideo(double startTimeInSeconds, double endTimeInSeconds)
-		{
-			if (string.IsNullOrEmpty(videoFile) || !File.Exists(Path.Combine(recordingsFolder, videoFile)))
-			{
-				Console.WriteLine("No video file found to clip.");
-				return;
-			}
-
-			string inputFile = Path.Combine(recordingsFolder, videoFile);
-			string outputFile = Path.Combine(recordingsFolder, $"clip_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.mp4");
-
-			string clipCommand = $"{ffmpegPath} -i \"{inputFile}\" -ss {startTimeInSeconds} -to {endTimeInSeconds} -c:v copy -c:a copy \"{outputFile}\"";
-			Console.WriteLine($"Clipping video: {clipCommand}");
-			Process ffmpegProcess = RunFFmpeg(clipCommand);
-
-			if (ffmpegProcess != null)
-			{
-				string errorOutput = ffmpegProcess.StandardError.ReadToEnd();
-				ffmpegProcess.WaitForExit();
-
-				if (ffmpegProcess.ExitCode != 0)
-				{
-					Console.WriteLine($"FFmpeg Error: {errorOutput}");
-				}
-				else
-				{
-					Console.WriteLine($"Clipped video saved to: {outputFile}");
+					Console.WriteLine($"Merged file saved to: {outputFilePath}");
 				}
 			}
 		}
 
 		public string GetRecordingTime()
 		{
-			return startTime.HasValue ? $"{(DateTime.Now - startTime.Value):mm\\:ss}" : "Not recording";
+			if (startTime.HasValue)
+			{
+				TimeSpan elapsed = DateTime.Now - startTime.Value;
+				return elapsed.ToString(@"hh\:mm\:ss");
+			}
+			return "Not recording";
 		}
 
 		private Process RunFFmpeg(string arguments)
@@ -186,14 +184,20 @@ namespace XeoClip
 			return process;
 		}
 
-		private string GenerateOutputFileName(string prefix, string extension)
-			=> Path.Combine(recordingsFolder, $"{prefix}_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.{extension}");
+		private string GenerateOutputFileName(string directory, string prefix, string extension)
+			=> Path.Combine(directory, $"{prefix}_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.{extension}");
 
 		private string GetFFmpegCommand(string outputFile)
-			=> $"{ffmpegPath} -hwaccel cuda -loglevel error -nostats -hide_banner -f gdigrab " +
+			=> $"{GetFFmpegPath()} -hwaccel cuda -loglevel error -nostats -hide_banner -f gdigrab " +
 			   $"-framerate 60 -video_size 1920x1080 -offset_x 0 -offset_y 0 -rtbufsize 100M " +
 			   $"-i desktop -c:v h264_nvenc -preset p1 -pix_fmt yuv420p -rc:v vbr_hq -cq:v 21 " +
 			   $"-b:v 8M -maxrate:v 16M -bufsize:v 32M -vsync cfr -f mp4 \"{outputFile}\"";
+
+		private string GetFFmpegPath()
+		{
+			// Adjust this path if FFmpeg is installed in a custom location
+			return "ffmpeg";
+		}
 
 		private void Cleanup()
 		{
@@ -208,29 +212,6 @@ namespace XeoClip
 			catch (Exception ex)
 			{
 				Console.WriteLine($"Error during cleanup: {ex.Message}");
-			}
-		}
-
-		private bool IsFFmpegAvailable()
-		{
-			try
-			{
-				ProcessStartInfo startInfo = new()
-				{
-					FileName = ffmpegPath,
-					Arguments = "-version",
-					RedirectStandardOutput = true,
-					UseShellExecute = false,
-					CreateNoWindow = true
-				};
-
-				using Process process = Process.Start(startInfo);
-				process.WaitForExit();
-				return process.ExitCode == 0;
-			}
-			catch
-			{
-				return false;
 			}
 		}
 	}

@@ -24,7 +24,7 @@ namespace XeoClip
 
 			// Initialize managers
 			ffmpegManager = new FFmpegManager(baseDirectory);
-			audioManager = new AudioManager(baseDirectory);
+			audioManager = new AudioManager();
 
 			// Gracefully stop all processes on program exit
 			AppDomain.CurrentDomain.ProcessExit += (_, _) => StopAll();
@@ -52,11 +52,19 @@ namespace XeoClip
 				Directory.CreateDirectory(baseDirectory);
 				Console.WriteLine($"Created base directory: {baseDirectory}");
 			}
+
+			// Ensure the recordings folder exists
+			string recordingsFolder = Path.Combine(baseDirectory, "recordings");
+			if (!Directory.Exists(recordingsFolder))
+			{
+				Directory.CreateDirectory(recordingsFolder);
+				Console.WriteLine($"Created recordings directory: {recordingsFolder}");
+			}
 		}
 
 		private static void CreateTimestampDirectory()
 		{
-			currentTimestampDir = Path.Combine(baseDirectory, DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss"));
+			currentTimestampDir = Path.Combine(baseDirectory, "recordings", DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss"));
 			Directory.CreateDirectory(currentTimestampDir);
 			Console.WriteLine($"Created timestamp directory: {currentTimestampDir}");
 		}
@@ -136,8 +144,8 @@ namespace XeoClip
 			CreateTimestampDirectory();
 
 			// Start recording video and audio
-			ffmpegManager.StartRecording();
-			audioManager.StartRecording();
+			ffmpegManager.StartRecording(currentTimestampDir);
+			audioManager.StartRecording(currentTimestampDir);
 
 			// Initialize and start the icon watcher
 			iconWatcher = new IconWatcher(baseDirectory, ffmpegManager);
@@ -160,6 +168,10 @@ namespace XeoClip
 			ffmpegManager?.StopRecording();
 			audioManager?.StopRecording();
 			iconWatcher?.StopWatching();
+
+			// Merge video and audio into the BASE > RECORDINGS folder
+			string recordingsFolder = Path.Combine(baseDirectory, "recordings");
+			ffmpegManager?.MergeAudioAndVideo(audioManager?.AudioFilePath ?? string.Empty, recordingsFolder);
 
 			Console.WriteLine("Recording stopped.");
 			currentTimestampDir = string.Empty; // Reset directory path

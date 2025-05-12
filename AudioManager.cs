@@ -8,20 +8,12 @@ namespace XeoClip
 	{
 		private WasapiLoopbackCapture? loopbackCapture;
 		private WaveFileWriter? waveFileWriter;
-		private readonly string recordingsFolder;
 		public string? AudioFilePath { get; private set; }
 
-		public AudioManager(string baseDirectory)
-		{
-			// Ensure the recordings folder exists within the base directory
-			recordingsFolder = Path.Combine(baseDirectory, "recordings");
-			Directory.CreateDirectory(recordingsFolder);
-		}
-
-		public void StartRecording()
+		public void StartRecording(string timestampDir)
 		{
 			Console.WriteLine("Starting system audio recording...");
-			AudioFilePath = GenerateOutputFileName("audio", "wav");
+			AudioFilePath = GenerateOutputFileName(timestampDir, "audio", "wav");
 
 			// Initialize WASAPI Loopback Capture
 			loopbackCapture = new WasapiLoopbackCapture();
@@ -65,7 +57,7 @@ namespace XeoClip
 			}
 		}
 
-		private string GenerateOutputFileName(string prefix, string extension)
-			=> Path.Combine(recordingsFolder, $"{prefix}_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.{extension}");
+		private string GenerateOutputFileName(string directory, string prefix, string extension)
+			=> Path.Combine(directory, $"{prefix}_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.{extension}");
 	}
 }
