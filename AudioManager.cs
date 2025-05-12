@@ -7,94 +7,97 @@ namespace XeoClip
 	internal class AudioManager
 	{
 		private WasapiLoopbackCapture? loopbackCapture;
+		private MemoryStream? audioBuffer;
 		private WaveFileWriter? waveFileWriter;
 		public string? AudioFilePath { get; private set; }
-		private long totalBytesWritten = 0; // Tracks the total bytes written to the audio file
 
 		public void StartRecording(string timestampDir, string sharedTimestamp)
 		{
-			Console.WriteLine("Starting system audio recording...");
-			AudioFilePath = GenerateOutputFileName(timestampDir, "audio", "wav", sharedTimestamp);
-
-			// Initialize WASAPI Loopback Capture
-			loopbackCapture = new WasapiLoopbackCapture();
-
-			// Set up the WaveFileWriter to save audio data
-			waveFileWriter = new WaveFileWriter(AudioFilePath, loopbackCapture.WaveFormat);
-
-			loopbackCapture.DataAvailable += (s, e) =>
+			try
 			{
-				// Write audio data to file
-				if (e.BytesRecorded > 0)
-				{
-					waveFileWriter?.Write(e.Buffer, 0, e.BytesRecorded);
-					totalBytesWritten += e.BytesRecorded; // Track the number of bytes written
-				}
-			};
+				AudioFilePath = GenerateOutputFileName(timestampDir, "audio", "wav", sharedTimestamp);
 
-			loopbackCapture.RecordingStopped += (s, e) =>
+				// Initialize WASAPI Loopback Capture
+				loopbackCapture = new WasapiLoopbackCapture();
+
+				// Initialize a memory buffer to store audio data temporarily
+				audioBuffer = new MemoryStream();
+
+				loopbackCapture.DataAvailable += (s, e) =>
+				{
+					if (e.BytesRecorded > 0)
+					{
+						// Write audio data to the memory buffer
+						audioBuffer?.Write(e.Buffer, 0, e.BytesRecorded);
+					}
+				};
+
+				loopbackCapture.RecordingStopped += (s, e) =>
+				{
+					try
+					{
+						// Write the buffer contents to a file
+						WriteBufferToFile();
+
+						// Dispose of resources
+						audioBuffer?.Dispose();
+						audioBuffer = null;
+						loopbackCapture?.Dispose();
+						loopbackCapture = null;
+					}
+					catch
+					{
+						// Handle any exceptions silently in release builds
+					}
+				};
+
+				loopbackCapture.StartRecording();
+			}
+			catch
 			{
-				waveFileWriter?.Dispose();
-				waveFileWriter = null;
-				loopbackCapture?.Dispose();
-				loopbackCapture = null;
-
-				// Check if any audio data was captured
-				if (totalBytesWritten == 0)
-				{
-					Console.WriteLine("No audio captured. Generating silent audio...");
-					GenerateSilentAudio(AudioFilePath, DateTime.Now - recordingStartTime);
-					Console.WriteLine($"Silent audio file saved to: {AudioFilePath}");
-				}
-				else
-				{
-					Console.WriteLine($"Audio recording complete. File saved to: {AudioFilePath}");
-				}
-			};
-
-			recordingStartTime = DateTime.Now; // Record the start time
-			loopbackCapture.StartRecording();
+				// Handle any exceptions silently in release builds
+			}
 		}
 
 		public void StopRecording()
 		{
 			if (loopbackCapture == null)
 			{
-				Console.WriteLine("No active audio recording to stop.");
 				return;
 			}
 
 			try
 			{
-				Console.WriteLine("Stopping system audio recording...");
 				loopbackCapture.StopRecording();
 			}
-			catch (Exception ex)
+			catch
 			{
-				Console.WriteLine($"Error stopping audio recording: {ex.Message}");
-			}
-			finally
-			{
-				// Reset the total bytes written for the next recording
-				totalBytesWritten = 0;
+				// Handle any exceptions silently in release builds
 			}
 		}
 
-		private void GenerateSilentAudio(string filePath, TimeSpan duration)
+		private void WriteBufferToFile()
 		{
-			// Create a silent audio file with the same format as the original recording
-			using var waveFile = new WaveFileWriter(filePath, loopbackCapture?.WaveFormat ?? new WaveFormat());
-			var silenceBuffer = new byte[waveFile.WaveFormat.AverageBytesPerSecond];
-
-			for (int i = 0; i < duration.TotalSeconds; i++)
+			if (audioBuffer == null || audioBuffer.Length == 0)
 			{
-				waveFile.Write(silenceBuffer, 0, silenceBuffer.Length);
+				return; // No audio data to write
+			}
+
+			try
+			{
+				audioBuffer.Seek(0, SeekOrigin.Begin); // Reset the buffer position to the start
+
+				// Create a WaveFileWriter to save the buffer as a WAV file
+				using var waveWriter = new WaveFileWriter(AudioFilePath, loopbackCapture?.WaveFormat ?? new WaveFormat());
+				audioBuffer.CopyTo(waveWriter);
+			}
+			catch
+			{
+				// Handle exceptions silently
 			}
 		}
 
 		private string GenerateOutputFileName(string directory, string prefix, string extension, string sharedTimestamp)
 			=> Path.Combine(directory, $"{prefix}_{sharedTimestamp}.{extension}");
-
-		private DateTime recordingStartTime; // Tracks the start time of the recording
 	}
 }
