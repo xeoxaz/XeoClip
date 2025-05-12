@@ -2,38 +2,72 @@
 using System.Diagnostics;
 using System.IO;
 using System.Threading;
-using Microsoft.VisualBasic;
 using NAudio.Wave;
+using OpenCvSharp;
 
 namespace XeoClip
 {
 	internal class Program
 	{
-		private static readonly FFmpegManager ffmpegManager = new();
-		private static readonly AudioManager audioManager = new();
+		private static FFmpegManager? ffmpegManager;
+		private static AudioManager? audioManager;
+		private static IconWatcher? iconWatcher;
 		private static int selectedIndex = 0;
 		private static readonly string[] options = { "Start Recording", "Stop Recording", "Exit" };
+		private static string currentTimestampDir = string.Empty;
+		private static readonly string baseDirectory = @"C:\test"; // Base directory for recordings and icons
 
 		static void Main()
 		{
-			EnsureDirectoryExists(@"C:\test\audio");
-			EnsureDirectoryExists(@"C:\test\video");
+			// Ensure base directory exists
+			SetupBaseDirectory();
+
+			// Initialize managers
+			ffmpegManager = new FFmpegManager(baseDirectory);
+			audioManager = new AudioManager(baseDirectory);
+
+			// Gracefully stop all processes on program exit
 			AppDomain.CurrentDomain.ProcessExit += (_, _) => StopAll();
 
+			// Main menu loop
 			while (true)
 			{
-				RenderMenu();
-				ProcessInput();
+				try
+				{
+					RenderMenu();
+					ProcessInput();
+				}
+				catch (Exception ex)
+				{
+					Console.WriteLine($"Error: {ex.Message}");
+					Thread.Sleep(2000); // Pause to let the user read the error
+				}
 			}
 		}
 
-		private static void EnsureDirectoryExists(string path) => Directory.CreateDirectory(path);
+		private static void SetupBaseDirectory()
+		{
+			if (!Directory.Exists(baseDirectory))
+			{
+				Directory.CreateDirectory(baseDirectory);
+				Console.WriteLine($"Created base directory: {baseDirectory}");
+			}
+		}
+
+		private static void CreateTimestampDirectory()
+		{
+			currentTimestampDir = Path.Combine(baseDirectory, DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss"));
+			Directory.CreateDirectory(currentTimestampDir);
+			Console.WriteLine($"Created timestamp directory: {currentTimestampDir}");
+		}
 
 		private static void RenderMenu()
 		{
 			Console.Clear();
+			Console.WriteLine("=== XeoClip Recorder ===");
 			Console.WriteLine("Use ↑ ↓ arrows to navigate. Press Enter to select:");
-			Console.WriteLine($"Recording Time: {ffmpegManager.GetRecordingTime()}");
+			Console.WriteLine($"Recording Time: {ffmpegManager?.GetRecordingTime() ?? "Not recording"}");
+			Console.WriteLine(new string('-', 30));
 
 			for (int i = 0; i < options.Length; i++)
 			{
@@ -42,15 +76,27 @@ namespace XeoClip
 				Console.WriteLine($"{(i == selectedIndex ? "> " : "  ")}{options[i]}");
 				Console.ResetColor();
 			}
+
+			Console.WriteLine(new string('-', 30));
 		}
 
 		private static void ProcessInput()
 		{
 			switch (Console.ReadKey(true).Key)
 			{
-				case ConsoleKey.UpArrow: selectedIndex = Math.Max(selectedIndex - 1, 0); break;
-				case ConsoleKey.DownArrow: selectedIndex = Math.Min(selectedIndex + 1, options.Length - 1); break;
-				case ConsoleKey.Enter: HandleSelection(); break;
+				case ConsoleKey.UpArrow:
+					selectedIndex = Math.Max(selectedIndex - 1, 0);
+					break;
+				case ConsoleKey.DownArrow:
+					selectedIndex = Math.Min(selectedIndex + 1, options.Length - 1);
+					break;
+				case ConsoleKey.Enter:
+					HandleSelection();
+					break;
+				default:
+					Console.WriteLine("Invalid input. Use ↑ ↓ to navigate and Enter to select.");
+					Thread.Sleep(1000); // Pause to let the user read the message
+					break;
 			}
 		}
 
@@ -59,202 +105,97 @@ namespace XeoClip
 			switch (options[selectedIndex])
 			{
 				case "Start Recording":
-					ffmpegManager.StartRecording();
-					audioManager.StartRecording();
+					StartRecording();
 					break;
+
 				case "Stop Recording":
-					ffmpegManager.StopRecording();
-					audioManager.StopRecording();
-					ffmpegManager.MergeAudioAndVideo(audioManager.AudioFilePath);
+					StopRecording();
 					break;
+
 				case "Exit":
-					Console.WriteLine("Exiting program...");
-					StopAll();
-					Environment.Exit(0);
+					ConfirmAndExit();
 					break;
+			}
+		}
+
+		private static void StartRecording()
+		{
+			if (ffmpegManager == null || audioManager == null)
+			{
+				throw new InvalidOperationException("Managers are not initialized.");
+			}
+
+			if (!string.IsNullOrEmpty(currentTimestampDir))
+			{
+				Console.WriteLine("Recording is already in progress. Stop the current recording before starting a new one.");
+				Thread.Sleep(2000); // Pause to let the user read the message
+				return;
+			}
+
+			// Create timestamped directory for recordings
+			CreateTimestampDirectory();
+
+			// Start recording video and audio
+			ffmpegManager.StartRecording();
+			audioManager.StartRecording();
+
+			// Initialize and start the icon watcher
+			iconWatcher = new IconWatcher(baseDirectory, ffmpegManager);
+			iconWatcher.StartWatching();
+
+			Console.WriteLine("Recording started.");
+			Thread.Sleep(1000); // Pause to let the user read the message
+		}
+
+		private static void StopRecording()
+		{
+			if (string.IsNullOrEmpty(currentTimestampDir))
+			{
+				Console.WriteLine("No recording is in progress to stop.");
+				Thread.Sleep(2000); // Pause to let the user read the message
+				return;
+			}
+
+			// Stop all active processes
+			ffmpegManager?.StopRecording();
+			audioManager?.StopRecording();
+			iconWatcher?.StopWatching();
+
+			Console.WriteLine("Recording stopped.");
+			currentTimestampDir = string.Empty; // Reset directory path
+			Thread.Sleep(1000); // Pause to let the user read the message
+		}
+
+		private static void ConfirmAndExit()
+		{
+			Console.WriteLine("Are you sure you want to exit? (Y/N)");
+			var key = Console.ReadKey(true).Key;
+
+			if (key == ConsoleKey.Y)
+			{
+				Console.WriteLine("Exiting program...");
+				StopAll();
+				Environment.Exit(0);
+			}
+			else
+			{
+				Console.WriteLine("Exit cancelled.");
+				Thread.Sleep(1000); // Pause to let the user read the message
 			}
 		}
 
 		private static void StopAll()
 		{
-			ffmpegManager.StopRecording();
-			audioManager.StopRecording();
-		}
-	}
-
-	internal class FFmpegManager
-	{
-		private Process? ffmpegProcess;
-		private DateTime? startTime;
-		private string? videoFile;
-		private Thread? recordingThread;
-
-		public void StartRecording()
-		{
-			if (ffmpegProcess != null) { Console.WriteLine("Recording already in progress..."); return; }
-
-			Console.WriteLine("Starting video recording...");
-			Console.Beep(1000, 500);
-
-			videoFile = GenerateOutputFileName(@"C:\test\video", "video", "mp4");
-			startTime = DateTime.Now;
-
-			string ffmpegCommand = GetFFmpegCommand();
-
-			recordingThread = new Thread(() =>
-			{
-				ffmpegProcess = RunFFmpeg(ffmpegCommand);
-				Thread.CurrentThread.Priority = ThreadPriority.Highest;
-			});
-
-			recordingThread.Start();
-		}
-
-		public void StopRecording()
-		{
-			if (ffmpegProcess == null || ffmpegProcess.HasExited) { Console.WriteLine("No active recording to stop."); return; }
-
 			try
 			{
-				Console.WriteLine("Stopping video recording...");
-				Console.Beep(800, 500);
-				ffmpegProcess.StandardInput.WriteLine("q");
-				ffmpegProcess.StandardInput.Flush();
-
-				// Wait for FFmpeg to exit naturally
-				if (!ffmpegProcess.WaitForExit(3000))
-				{
-					Console.WriteLine("Forcing video recording shutdown...");
-					ffmpegProcess.Kill();
-				}
-
-				Console.WriteLine($"Video saved to: {videoFile}");
+				ffmpegManager?.StopRecording();
+				audioManager?.StopRecording();
+				iconWatcher?.StopWatching();
 			}
 			catch (Exception ex)
 			{
-				Console.WriteLine($"Error stopping video recording: {ex.Message}");
-			}
-			finally
-			{
-				Cleanup();
+				Console.WriteLine($"Error during cleanup: {ex.Message}");
 			}
 		}
-
-		public void MergeAudioAndVideo(string audioFile)
-		{
-			if (string.IsNullOrEmpty(videoFile) || string.IsNullOrEmpty(audioFile))
-			{
-				Console.WriteLine("Video or audio file is missing.");
-				return;
-			}
-
-			string outputFile = GenerateOutputFileName(@"C:\test", "final", "mp4");
-			string mergeCommand = $"ffmpeg -i \"{videoFile}\" -i \"{audioFile}\" -c:v copy -c:a aac \"{outputFile}\"";
-
-			Console.WriteLine("Merging video and audio...");
-			Process ffmpegProcess = RunFFmpeg(mergeCommand);
-
-			if (ffmpegProcess != null)
-			{
-				string errorOutput = ffmpegProcess.StandardError.ReadToEnd();
-				ffmpegProcess.WaitForExit();
-
-				if (ffmpegProcess.ExitCode != 0)
-				{
-					Console.WriteLine($"FFmpeg Error: {errorOutput}");
-				}
-				else
-				{
-					Console.WriteLine($"Merged file saved to: {outputFile}");
-				}
-			}
-		}
-
-		private Process RunFFmpeg(string arguments)
-		{
-			ProcessStartInfo startInfo = new()
-			{
-				FileName = "cmd.exe",
-				Arguments = $"/C {arguments}",
-				RedirectStandardInput = true,
-				RedirectStandardError = true,
-				UseShellExecute = false,
-				CreateNoWindow = true
-			};
-
-			Process process = new() { StartInfo = startInfo };
-			process.Start();
-			process.PriorityClass = ProcessPriorityClass.High;
-			return process;
-		}
-
-		private static string GenerateOutputFileName(string directory, string prefix, string extension)
-			=> Path.Combine(directory, $"{prefix}_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.{extension}");
-
-		private string GetFFmpegCommand() => $"ffmpeg -hwaccel cuda -loglevel error -nostats -hide_banner -f gdigrab -framerate 60 -video_size 1920x1080 -offset_x 0 -offset_y 0 -rtbufsize 100M -i desktop -c:v h264_nvenc -preset p1 -pix_fmt yuv420p -rc:v vbr_hq -cq:v 21 -b:v 8M -maxrate:v 16M -bufsize:v 32M -vsync cfr -f mp4 \"{videoFile}\" > nul 2>&1";
-
-		public string GetRecordingTime() => startTime.HasValue ? $"{(DateTime.Now - startTime.Value):mm\\:ss}" : "Not recording";
-
-		private void Cleanup()
-		{
-			ffmpegProcess?.Dispose();
-			ffmpegProcess = null;
-			startTime = null;
-			recordingThread?.Join();
-			recordingThread = null;
-		}
-	}
-
-	internal class AudioManager
-	{
-		private WaveInEvent? waveIn;
-		private WaveFileWriter? waveFileWriter;
-		public string? AudioFilePath { get; private set; }
-
-		public void StartRecording()
-		{
-			Console.WriteLine("Starting audio recording...");
-			AudioFilePath = GenerateOutputFileName(@"C:\test\audio", "audio", "wav");
-
-			waveIn = new WaveInEvent
-			{
-				DeviceNumber = 0, // Default audio input device
-				WaveFormat = new WaveFormat(44100, 1) // 44.1kHz, mono
-			};
-
-			waveIn.DataAvailable += (s, e) =>
-			{
-				waveFileWriter?.Write(e.Buffer, 0, e.BytesRecorded);
-			};
-
-			waveFileWriter = new WaveFileWriter(AudioFilePath, waveIn.WaveFormat);
-			waveIn.StartRecording();
-		}
-
-		public void StopRecording()
-		{
-			if (waveIn == null) { Console.WriteLine("No active audio recording to stop."); return; }
-
-			try
-			{
-				Console.WriteLine("Stopping audio recording...");
-				waveIn.StopRecording();
-				waveFileWriter?.Dispose();
-				Console.WriteLine($"Audio saved to: {AudioFilePath}");
-			}
-			catch (Exception ex)
-			{
-				Console.WriteLine($"Error stopping audio recording: {ex.Message}");
-			}
-			finally
-			{
-				waveIn?.Dispose();
-				waveIn = null;
-				waveFileWriter = null;
-			}
-		}
-
-		private static string GenerateOutputFileName(string directory, string prefix, string extension)
-			=> Path.Combine(directory, $"{prefix}_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.{extension}");
 	}
 }
