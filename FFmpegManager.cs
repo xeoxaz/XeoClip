@@ -21,6 +21,12 @@ namespace XeoClip
 			this.baseDirectory = baseDirectory;
 		}
 
+		// Property to expose the video file path
+		public string? VideoFilePath => videoFilePath;
+
+		// Property to expose the merged file path
+		public string? MergedFilePath => mergedFilePath;
+
 		public void StartRecording(string sharedTimestamp)
 		{
 			if (ffmpegProcess != null)
@@ -60,7 +66,7 @@ namespace XeoClip
 			recordingThread.Start();
 		}
 
-		public void StopRecording(string audioFilePath, string sharedTimestamp, List<DateTime> clipTimestamps)
+		public async void StopRecording(string audioFilePath, string sharedTimestamp, List<DateTime> clipTimestamps)
 		{
 			if (ffmpegProcess == null || ffmpegProcess.HasExited)
 			{
@@ -96,7 +102,7 @@ namespace XeoClip
 			if (!string.IsNullOrEmpty(audioFilePath) && File.Exists(audioFilePath))
 			{
 				var timestampDir = Path.GetDirectoryName(videoFilePath);
-				MergeAudioAndVideo(audioFilePath, timestampDir, sharedTimestamp);
+				await MergeAudioAndVideoAsync(audioFilePath, timestampDir, sharedTimestamp);
 
 				// Check for clip timestamps and create clips
 				if (clipTimestamps != null && clipTimestamps.Count > 0)
@@ -110,7 +116,7 @@ namespace XeoClip
 			}
 		}
 
-		public void MergeAudioAndVideo(string audioFilePath, string outputDir, string sharedTimestamp)
+		public async Task MergeAudioAndVideoAsync(string audioFilePath, string outputDir, string sharedTimestamp)
 		{
 			if (string.IsNullOrEmpty(videoFilePath))
 			{
@@ -131,7 +137,10 @@ namespace XeoClip
 			string mergeCommand = $"{GetFFmpegPath()} -i \"{videoFilePath}\" -i \"{audioFilePath}\" -c:v copy -c:a aac \"{mergedFilePath}\"";
 
 			Console.WriteLine("Merging video and audio...");
-			RunFFmpeg(mergeCommand);
+			await Task.Run(() =>
+			{
+				RunFFmpeg(mergeCommand);
+			});
 
 			if (File.Exists(mergedFilePath))
 			{

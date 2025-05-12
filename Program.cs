@@ -136,7 +136,7 @@ namespace XeoClip
 			}
 		}
 
-		private static void HandleSelection()
+		private static async void HandleSelection()
 		{
 			switch (options[selectedIndex])
 			{
@@ -144,7 +144,7 @@ namespace XeoClip
 					StartRecording();
 					break;
 				case "Stop Recording":
-					StopRecording();
+					await StopRecordingAsync();
 					break;
 				case "Clean Up":
 					CleanUp();
@@ -189,25 +189,65 @@ namespace XeoClip
 			Thread.Sleep(1000);
 		}
 
-		private static void StopRecording()
+		private static async Task StopRecordingAsync()
 		{
 			if (string.IsNullOrEmpty(currentTimestampDir))
 			{
 				Log("No recording is in progress to stop.");
-				Thread.Sleep(2000);
+				await Task.Delay(2000);
 				return;
 			}
 
-			// Stop recording and merge audio-video
-			var clipTimestamps = iconWatcher?.GetBufferedTimestamps() ?? new List<DateTime>();
-			ffmpegManager?.StopRecording(audioFilePath ?? string.Empty, sharedTimestamp ?? string.Empty, clipTimestamps);
-			audioManager?.StopRecording();
-			iconWatcher?.StopWatching();
+			try
+			{
+				// 1. Stop audio recording
+				audioManager?.StopRecording();
+
+				// 2. Stop video recording and wait for it to finish
+				var clipTimestamps = iconWatcher?.GetBufferedTimestamps() ?? new List<DateTime>();
+				ffmpegManager?.StopRecording(audioFilePath ?? string.Empty, sharedTimestamp ?? string.Empty, clipTimestamps);
+
+				// 3. Stop the icon watcher
+				iconWatcher?.StopWatching();
+
+				// Ensure both audio and video files are saved before merging
+				if (!File.Exists(audioFilePath))
+				{
+					Log("Audio file not found. Aborting merge and clip creation.");
+					return;
+				}
+
+				if (!File.Exists(ffmpegManager?.VideoFilePath))
+				{
+					Log("Video file not found. Aborting merge and clip creation.");
+					return;
+				}
+
+				// 4. Merge audio and video
+				Log("Merging video and audio...");
+				await ffmpegManager.MergeAudioAndVideoAsync(audioFilePath, currentTimestampDir, sharedTimestamp ?? string.Empty);
+
+				// 5. Process timestamps and create clips
+				Log("Processing buffered timestamps...");
+				var mergedFilePath = ffmpegManager?.MergedFilePath;
+				if (!string.IsNullOrEmpty(mergedFilePath) && File.Exists(mergedFilePath))
+				{
+					ffmpegManager?.CreateClipsFromTimestamps(clipTimestamps, currentTimestampDir, sharedTimestamp ?? string.Empty);
+				}
+				else
+				{
+					Log("No merged file found to create clips.");
+				}
+			}
+			catch (Exception ex)
+			{
+				Log($"Error during stop recording: {ex.Message}");
+			}
 
 			Log("Recording stopped.");
 			currentTimestampDir = string.Empty;
 			sharedTimestamp = null;
-			Thread.Sleep(1000);
+			await Task.Delay(1000);
 		}
 
 		private static void CleanUp()
