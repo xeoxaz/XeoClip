@@ -10,6 +10,7 @@ namespace XeoClip
 		private Process? ffmpegProcess;
 		private DateTime? startTime;
 		private string? videoFilePath;
+		private string? mergedFilePath;
 		private Thread? recordingThread;
 		private readonly string baseDirectory;
 
@@ -87,36 +88,6 @@ namespace XeoClip
 			}
 		}
 
-		public void ClipVideo(double startTimeInSeconds, double endTimeInSeconds, string timestampDir)
-		{
-			if (string.IsNullOrEmpty(videoFilePath) || !File.Exists(videoFilePath))
-			{
-				Console.WriteLine("No video file found to clip.");
-				return;
-			}
-
-			string outputFilePath = GenerateOutputFileName(timestampDir, "clip", "mp4");
-			string clipCommand = $"{GetFFmpegPath()} -i \"{videoFilePath}\" -ss {startTimeInSeconds} -to {endTimeInSeconds} -c:v copy -c:a copy \"{outputFilePath}\"";
-
-			Console.WriteLine($"Clipping video from {startTimeInSeconds} to {endTimeInSeconds} seconds...");
-			Process ffmpegProcess = RunFFmpeg(clipCommand);
-
-			if (ffmpegProcess != null)
-			{
-				string errorOutput = ffmpegProcess.StandardError.ReadToEnd();
-				ffmpegProcess.WaitForExit();
-
-				if (ffmpegProcess.ExitCode != 0)
-				{
-					Console.WriteLine($"FFmpeg Error: {errorOutput}");
-				}
-				else
-				{
-					Console.WriteLine($"Clipped video saved to: {outputFilePath}");
-				}
-			}
-		}
-
 		public void MergeAudioAndVideo(string audioFilePath, string outputDir)
 		{
 			if (string.IsNullOrEmpty(videoFilePath))
@@ -132,26 +103,56 @@ namespace XeoClip
 			}
 
 			// Generate the merged file path
-			string outputFilePath = GenerateOutputFileName(outputDir, "merged", "mp4");
+			mergedFilePath = GenerateOutputFileName(outputDir, "merged", "mp4");
 
 			// FFmpeg command to merge video and audio
-			string mergeCommand = $"{GetFFmpegPath()} -i \"{videoFilePath}\" -i \"{audioFilePath}\" -c:v copy -c:a aac \"{outputFilePath}\"";
+			string mergeCommand = $"{GetFFmpegPath()} -i \"{videoFilePath}\" -i \"{audioFilePath}\" -c:v copy -c:a aac \"{mergedFilePath}\"";
 
 			Console.WriteLine("Merging video and audio...");
-			Process ffmpegProcess = RunFFmpeg(mergeCommand);
+			Process mergeProcess = RunFFmpeg(mergeCommand);
 
-			if (ffmpegProcess != null)
+			if (mergeProcess != null)
 			{
-				string errorOutput = ffmpegProcess.StandardError.ReadToEnd();
-				ffmpegProcess.WaitForExit();
+				string errorOutput = mergeProcess.StandardError.ReadToEnd();
+				mergeProcess.WaitForExit();
 
-				if (ffmpegProcess.ExitCode != 0)
+				if (mergeProcess.ExitCode != 0)
 				{
 					Console.WriteLine($"FFmpeg Error: {errorOutput}");
 				}
 				else
 				{
-					Console.WriteLine($"Merged file saved to: {outputFilePath}");
+					Console.WriteLine($"Merged file saved to: {mergedFilePath}");
+				}
+			}
+		}
+
+		public void ClipVideo(double startTimeInSeconds, double endTimeInSeconds, string timestampDir)
+		{
+			if (string.IsNullOrEmpty(mergedFilePath) || !File.Exists(mergedFilePath))
+			{
+				Console.WriteLine("No merged file found to clip. Please ensure merging is completed before clipping.");
+				return;
+			}
+
+			string outputFilePath = GenerateOutputFileName(timestampDir, "clip", "mp4");
+			string clipCommand = $"{GetFFmpegPath()} -i \"{mergedFilePath}\" -ss {startTimeInSeconds} -to {endTimeInSeconds} -c:v copy -c:a copy \"{outputFilePath}\"";
+
+			Console.WriteLine($"Clipping video from {startTimeInSeconds} to {endTimeInSeconds} seconds...");
+			Process clipProcess = RunFFmpeg(clipCommand);
+
+			if (clipProcess != null)
+			{
+				string errorOutput = clipProcess.StandardError.ReadToEnd();
+				clipProcess.WaitForExit();
+
+				if (clipProcess.ExitCode != 0)
+				{
+					Console.WriteLine($"FFmpeg Error: {errorOutput}");
+				}
+				else
+				{
+					Console.WriteLine($"Clipped video saved to: {outputFilePath}");
 				}
 			}
 		}

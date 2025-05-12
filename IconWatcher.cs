@@ -1,5 +1,7 @@
 ﻿using OpenCvSharp;
 using System;
+using System.Drawing;
+using System.Drawing.Imaging;
 using System.IO;
 using System.Threading;
 
@@ -11,14 +13,14 @@ namespace XeoClip
 		private readonly FFmpegManager ffmpegManager;
 		private Thread? watcherThread;
 		private volatile bool isWatching;
-		private readonly string timestampDir;
+		private readonly string baseDirectory;
 
 		public IconWatcher(string baseDirectory, FFmpegManager ffmpegManager)
 		{
-			// Ensure icons folder exists
-			iconsPath = Path.Combine(baseDirectory, "icons");
+			this.baseDirectory = baseDirectory;
 			this.ffmpegManager = ffmpegManager;
-			this.timestampDir = baseDirectory;
+
+			iconsPath = Path.Combine(baseDirectory, "icons");
 
 			if (!Directory.Exists(iconsPath))
 			{
@@ -35,7 +37,6 @@ namespace XeoClip
 				return;
 			}
 
-			// Load icons and check if any are present
 			var icons = LoadIcons();
 			if (icons.Length == 0)
 			{
@@ -44,34 +45,19 @@ namespace XeoClip
 			}
 
 			isWatching = true;
-
 			Console.WriteLine("Starting IconWatcher...");
 			watcherThread = new Thread(() =>
 			{
 				try
 				{
-					using var capture = new VideoCapture(0); // Replace "0" with video feed path if needed
-					if (!capture.IsOpened())
-					{
-						Console.WriteLine("Failed to open video feed. IconWatcher will stop.");
-						return;
-					}
-
 					while (isWatching)
 					{
-						try
+						using var screenshot = CaptureScreen();
+						if (TryDetectIcons(screenshot, icons))
 						{
-							if (TryDetectIcons(capture, icons, out double timestamp))
-							{
-								Console.WriteLine($"Icon detected at {timestamp:F2} seconds. Clipping video...");
-								ffmpegManager.ClipVideo(timestamp - 5, timestamp + 5, timestampDir);
-							}
+							Console.WriteLine("Icon detected! Clipping video...");
+							ffmpegManager.ClipVideo(5, 5, baseDirectory); // Adjust as per your directory structure
 						}
-						catch (Exception ex)
-						{
-							Console.WriteLine($"Error during icon detection: {ex.Message}");
-						}
-
 						Thread.Sleep(100); // Reduce CPU usage
 					}
 				}
@@ -84,9 +70,7 @@ namespace XeoClip
 					Console.WriteLine("IconWatcher stopped.");
 				}
 			})
-			{
-				IsBackground = true
-			};
+			{ IsBackground = true };
 
 			watcherThread.Start();
 		}
@@ -108,34 +92,31 @@ namespace XeoClip
 		private Mat[] LoadIcons()
 		{
 			var files = Directory.GetFiles(iconsPath, "*.png");
-			if (files.Length == 0)
-			{
-				Console.WriteLine("No icons found in the icons folder.");
-			}
-			else
-			{
-				Console.WriteLine($"Loaded {files.Length} icon(s) from {iconsPath}.");
-			}
-
+			Console.WriteLine($"Found {files.Length} icon(s) in {iconsPath}.");
 			return Array.ConvertAll(files, file => Cv2.ImRead(file, ImreadModes.Grayscale));
 		}
 
-		private bool TryDetectIcons(VideoCapture capture, Mat[] icons, out double timestamp)
+		private Bitmap CaptureScreen()
 		{
-			timestamp = 0;
+			var bounds = System.Windows.Forms.Screen.PrimaryScreen.Bounds;
+			var screenshot = new Bitmap(bounds.Width, bounds.Height, PixelFormat.Format32bppArgb);
 
-			using var frame = new Mat();
-			if (!capture.Read(frame))
+			using (var graphics = Graphics.FromImage(screenshot))
 			{
-				Console.WriteLine("Failed to read frame from video feed.");
-				return false;
+				graphics.CopyFromScreen(bounds.X, bounds.Y, 0, 0, bounds.Size, CopyPixelOperation.SourceCopy);
 			}
 
+			return screenshot;
+		}
+
+		private bool TryDetectIcons(Bitmap screenshot, Mat[] icons)
+		{
+			using var frame = OpenCvSharp.Extensions.BitmapConverter.ToMat(screenshot);
 			foreach (var icon in icons)
 			{
-				if (DetectIcon(frame, icon))
+				if (DetectIcon(frame, icon, out double matchValue))
 				{
-					timestamp = capture.PosMsec / 1000.0; // Current video timestamp in seconds
+					Console.WriteLine($"Match Value: {matchValue:F2} (Threshold: 0.8)");
 					return true;
 				}
 			}
@@ -143,17 +124,17 @@ namespace XeoClip
 			return false;
 		}
 
-		private bool DetectIcon(Mat frame, Mat icon)
+		private bool DetectIcon(Mat frame, Mat icon, out double matchValue)
 		{
+			matchValue = 0.0;
+
 			try
 			{
 				using var grayFrame = ConvertToGrayscale(frame);
-				using var grayIcon = ConvertToGrayscale(icon);
-
 				using var frameEdges = ApplyCannyEdgeDetection(grayFrame);
-				using var iconEdges = ApplyCannyEdgeDetection(grayIcon);
 
-				return PerformTemplateMatching(frameEdges, iconEdges, 0.8);
+				using var iconEdges = ApplyCannyEdgeDetection(icon);
+				return PerformTemplateMatching(frameEdges, iconEdges, 0.8, out matchValue);
 			}
 			catch (Exception ex)
 			{
@@ -178,12 +159,12 @@ namespace XeoClip
 			return edges;
 		}
 
-		private bool PerformTemplateMatching(Mat frameEdges, Mat iconEdges, double threshold)
+		private bool PerformTemplateMatching(Mat frameEdges, Mat iconEdges, double threshold, out double matchValue)
 		{
 			using var result = new Mat();
 			Cv2.MatchTemplate(frameEdges, iconEdges, result, TemplateMatchModes.CCoeffNormed);
-			Cv2.MinMaxLoc(result, out _, out double maxVal, out _, out _);
-			return maxVal > threshold;
+			Cv2.MinMaxLoc(result, out _, out matchValue, out _, out _);
+			return matchValue > threshold;
 		}
 	}
 }
