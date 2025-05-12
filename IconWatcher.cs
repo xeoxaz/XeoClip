@@ -1,5 +1,6 @@
 ﻿using OpenCvSharp;
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
@@ -14,11 +15,13 @@ namespace XeoClip
 		private Thread? watcherThread;
 		private volatile bool isWatching;
 		private readonly string baseDirectory;
+		private readonly List<DateTime> detectionTimestamps; // Buffer to store timestamps
 
 		public IconWatcher(string baseDirectory, FFmpegManager ffmpegManager)
 		{
 			this.baseDirectory = baseDirectory;
 			this.ffmpegManager = ffmpegManager;
+			detectionTimestamps = new List<DateTime>(); // Initialize the buffer
 
 			iconsPath = Path.Combine(baseDirectory, "icons");
 
@@ -55,10 +58,18 @@ namespace XeoClip
 						using var screenshot = CaptureScreen();
 						if (TryDetectIcons(screenshot, icons))
 						{
-							Console.WriteLine("Icon detected! Clipping video...");
-							ffmpegManager.ClipVideo(5, 5, baseDirectory); // Adjust as per your directory structure
+							var detectionTime = DateTime.Now;
+							Console.WriteLine($"Icon detected at {detectionTime}. Buffering timestamp...");
+							detectionTimestamps.Add(detectionTime); // Buffer the timestamp
+
+							// Wait 10 seconds before checking for the next icon
+							Console.WriteLine("Waiting 10 seconds before checking for the next icon...");
+							Thread.Sleep(10000); // 10 seconds delay
 						}
-						Thread.Sleep(100); // Reduce CPU usage
+						else
+						{
+							Thread.Sleep(100); // Reduce CPU usage
+						}
 					}
 				}
 				catch (Exception ex)
@@ -87,6 +98,39 @@ namespace XeoClip
 			isWatching = false;
 			watcherThread?.Join();
 			Console.WriteLine("IconWatcher has stopped.");
+
+			// Process buffered timestamps
+			ProcessBufferedTimestamps();
+		}
+
+		public List<DateTime> GetBufferedTimestamps()
+		{
+			// Return a copy of the buffered timestamps for external use
+			return new List<DateTime>(detectionTimestamps);
+		}
+
+		private void ProcessBufferedTimestamps()
+		{
+			if (detectionTimestamps.Count == 0)
+			{
+				Console.WriteLine("No timestamps to process.");
+				return;
+			}
+
+			Console.WriteLine("Processing buffered timestamps...");
+			var outputDirectory = Path.Combine(baseDirectory, "recordings");
+
+			// Ensure the output directory exists
+			if (!Directory.Exists(outputDirectory))
+			{
+				Directory.CreateDirectory(outputDirectory);
+			}
+
+			// Use the updated FFmpegManager to create clips based on detected timestamps
+			ffmpegManager.CreateClipsFromTimestamps(detectionTimestamps, outputDirectory);
+
+			// Clear the buffer after processing
+			detectionTimestamps.Clear();
 		}
 
 		private Mat[] LoadIcons()

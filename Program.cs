@@ -15,6 +15,7 @@ namespace XeoClip
 		private static int selectedIndex = 0;
 		private static readonly string[] options = { "Start Recording", "Stop Recording", "Clean Up", "Exit" };
 		private static string currentTimestampDir = string.Empty;
+		private static string? audioFilePath = null;
 		private static readonly string baseDirectory = @"C:\test"; // Base directory for recordings and icons
 
 		// Automatically set debug based on the build configuration
@@ -22,7 +23,7 @@ namespace XeoClip
 #if DEBUG
 			true;
 #else
-            false;
+			false;
 #endif
 
 		static void Main()
@@ -169,8 +170,10 @@ namespace XeoClip
 
 			CreateTimestampDirectory();
 
-			ffmpegManager.StartRecording(currentTimestampDir);
+			ffmpegManager.StartRecording();
 			audioManager.StartRecording(currentTimestampDir);
+
+			audioFilePath = Path.Combine(currentTimestampDir, $"audio_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.mp4");
 
 			iconWatcher = new IconWatcher(baseDirectory, ffmpegManager);
 			iconWatcher.StartWatching();
@@ -188,12 +191,11 @@ namespace XeoClip
 				return;
 			}
 
-			ffmpegManager?.StopRecording();
+			// Stop recording and merge audio-video
+			var clipTimestamps = iconWatcher?.GetBufferedTimestamps() ?? new List<DateTime>();
+			ffmpegManager?.StopRecording(audioFilePath ?? string.Empty, clipTimestamps);
 			audioManager?.StopRecording();
 			iconWatcher?.StopWatching();
-
-			string recordingsFolder = Path.Combine(baseDirectory, "recordings");
-			ffmpegManager?.MergeAudioAndVideo(audioManager?.AudioFilePath ?? string.Empty, recordingsFolder);
 
 			Log("Recording stopped.");
 			currentTimestampDir = string.Empty;
@@ -227,7 +229,8 @@ namespace XeoClip
 		{
 			try
 			{
-				ffmpegManager?.StopRecording();
+				var clipTimestamps = iconWatcher?.GetBufferedTimestamps() ?? new List<DateTime>();
+				ffmpegManager?.StopRecording(audioFilePath ?? string.Empty, clipTimestamps);
 				audioManager?.StopRecording();
 				iconWatcher?.StopWatching();
 			}
