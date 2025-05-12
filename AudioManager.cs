@@ -10,10 +10,10 @@ namespace XeoClip
 		private WaveFileWriter? waveFileWriter;
 		public string? AudioFilePath { get; private set; }
 
-		public void StartRecording(string timestampDir)
+		public void StartRecording(string timestampDir, string sharedTimestamp)
 		{
 			Console.WriteLine("Starting system audio recording...");
-			AudioFilePath = GenerateOutputFileName(timestampDir, "audio", "wav");
+			AudioFilePath = GenerateOutputFileName(timestampDir, "audio", "wav", sharedTimestamp);
 
 			// Initialize WASAPI Loopback Capture
 			loopbackCapture = new WasapiLoopbackCapture();
@@ -57,7 +57,7 @@ namespace XeoClip
 			}
 		}
 
-		private string GenerateOutputFileName(string directory, string prefix, string extension)
-			=> Path.Combine(directory, $"{prefix}_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.{extension}");
+		private string GenerateOutputFileName(string directory, string prefix, string extension, string sharedTimestamp)
+			=> Path.Combine(directory, $"{prefix}_{sharedTimestamp}.{extension}");
 	}
 }

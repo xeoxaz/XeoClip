@@ -2,7 +2,6 @@
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Collections.Generic;
 using System.Threading;
 
@@ -22,7 +21,7 @@ namespace XeoClip
 			this.baseDirectory = baseDirectory;
 		}
 
-		public void StartRecording()
+		public void StartRecording(string sharedTimestamp)
 		{
 			if (ffmpegProcess != null)
 			{
@@ -34,10 +33,10 @@ namespace XeoClip
 			Console.Beep(1000, 500);
 
 			// Generate timestamped directory
-			string timestampDir = GenerateTimestampedDirectory();
+			string timestampDir = GenerateTimestampedDirectory(sharedTimestamp);
 
-			// Generate the video file path in the timestamped directory
-			videoFilePath = GenerateOutputFileName(timestampDir, "video", "mp4");
+			// Generate the video file path using the shared timestamp
+			videoFilePath = Path.Combine(timestampDir, $"video_{sharedTimestamp}.mp4");
 			startTime = DateTime.Now;
 
 			string ffmpegCommand = GetFFmpegCommand(videoFilePath);
@@ -61,7 +60,7 @@ namespace XeoClip
 			recordingThread.Start();
 		}
 
-		public void StopRecording(string audioFilePath, List<DateTime> clipTimestamps)
+		public void StopRecording(string audioFilePath, string sharedTimestamp, List<DateTime> clipTimestamps)
 		{
 			if (ffmpegProcess == null || ffmpegProcess.HasExited)
 			{
@@ -97,12 +96,12 @@ namespace XeoClip
 			if (!string.IsNullOrEmpty(audioFilePath) && File.Exists(audioFilePath))
 			{
 				var timestampDir = Path.GetDirectoryName(videoFilePath);
-				MergeAudioAndVideo(audioFilePath, timestampDir);
+				MergeAudioAndVideo(audioFilePath, timestampDir, sharedTimestamp);
 
 				// Check for clip timestamps and create clips
 				if (clipTimestamps != null && clipTimestamps.Count > 0)
 				{
-					CreateClipsFromTimestamps(clipTimestamps, timestampDir);
+					CreateClipsFromTimestamps(clipTimestamps, timestampDir, sharedTimestamp);
 				}
 			}
 			else
@@ -111,7 +110,7 @@ namespace XeoClip
 			}
 		}
 
-		public void MergeAudioAndVideo(string audioFilePath, string outputDir)
+		public void MergeAudioAndVideo(string audioFilePath, string outputDir, string sharedTimestamp)
 		{
 			if (string.IsNullOrEmpty(videoFilePath))
 			{
@@ -125,8 +124,8 @@ namespace XeoClip
 				return;
 			}
 
-			// Generate the merged file path
-			mergedFilePath = GenerateOutputFileName(outputDir, "merged", "mp4");
+			// Generate the merged file path inside the synced timestamp folder
+			mergedFilePath = Path.Combine(outputDir ?? string.Empty, $"merged_{sharedTimestamp}.mp4");
 
 			// FFmpeg command to merge video and audio
 			string mergeCommand = $"{GetFFmpegPath()} -i \"{videoFilePath}\" -i \"{audioFilePath}\" -c:v copy -c:a aac \"{mergedFilePath}\"";
@@ -140,7 +139,7 @@ namespace XeoClip
 			}
 		}
 
-		public void CreateClipsFromTimestamps(List<DateTime> timestamps, string outputDir)
+		public void CreateClipsFromTimestamps(List<DateTime> timestamps, string outputDir, string sharedTimestamp)
 		{
 			if (string.IsNullOrEmpty(mergedFilePath) || !File.Exists(mergedFilePath))
 			{
@@ -154,7 +153,7 @@ namespace XeoClip
 				double startTime = (timestamps[i] - timestamps.First()).TotalSeconds;
 				double endTime = (timestamps[i + 1] - timestamps.First()).TotalSeconds;
 
-				string clipFilePath = GenerateOutputFileName(outputDir, $"clip_{i + 1}", "mp4");
+				string clipFilePath = Path.Combine(outputDir, $"clip_{sharedTimestamp}_part{i + 1}.mp4");
 				string clipCommand = $"{GetFFmpegPath()} -i \"{mergedFilePath}\" -ss {startTime} -to {endTime} -c:v copy -c:a copy \"{clipFilePath}\"";
 
 				Console.WriteLine($"Creating clip {i + 1} from {startTime:F2}s to {endTime:F2}s...");
@@ -181,18 +180,12 @@ namespace XeoClip
 			return "Not recording";
 		}
 
-		private string GenerateTimestampedDirectory()
+		private string GenerateTimestampedDirectory(string sharedTimestamp)
 		{
 			string recordingsDir = Path.Combine(baseDirectory, "recordings");
-			string timestampDir = Path.Combine(recordingsDir, DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss"));
+			string timestampDir = Path.Combine(recordingsDir, sharedTimestamp);
 			Directory.CreateDirectory(timestampDir);
 			return timestampDir;
-		}
-
-		private string GenerateOutputFileName(string directory, string prefix, string extension)
-		{
-			string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
-			return Path.Combine(directory, $"{prefix}_{timestamp}.{extension}");
 		}
 
 		private Process RunFFmpeg(string arguments)

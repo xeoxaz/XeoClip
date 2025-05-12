@@ -127,7 +127,7 @@ namespace XeoClip
 			}
 
 			// Use the updated FFmpegManager to create clips based on detected timestamps
-			ffmpegManager.CreateClipsFromTimestamps(detectionTimestamps, outputDirectory);
+			// ffmpegManager.MergeClips(detectionTimestamps, outputDirectory);
 
 			// Clear the buffer after processing
 			detectionTimestamps.Clear();

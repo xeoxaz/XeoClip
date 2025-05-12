@@ -15,6 +15,7 @@ namespace XeoClip
 		private static int selectedIndex = 0;
 		private static readonly string[] options = { "Start Recording", "Stop Recording", "Clean Up", "Exit" };
 		private static string currentTimestampDir = string.Empty;
+		private static string? sharedTimestamp = null;
 		private static string? audioFilePath = null;
 		private static readonly string baseDirectory = @"C:\test"; // Base directory for recordings and icons
 
@@ -68,7 +69,7 @@ namespace XeoClip
 
 		private static void CreateTimestampDirectory()
 		{
-			currentTimestampDir = Path.Combine(baseDirectory, "recordings", DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss"));
+			currentTimestampDir = Path.Combine(baseDirectory, "recordings", sharedTimestamp ?? DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss"));
 			Directory.CreateDirectory(currentTimestampDir);
 			Log($"Created timestamp directory: {currentTimestampDir}");
 		}
@@ -168,12 +169,18 @@ namespace XeoClip
 				return;
 			}
 
+			// Generate a shared timestamp
+			sharedTimestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+
+			// Create a shared timestamp directory
 			CreateTimestampDirectory();
 
-			ffmpegManager.StartRecording();
-			audioManager.StartRecording(currentTimestampDir);
+			// Start video and audio recording with the same shared timestamp
+			ffmpegManager.StartRecording(sharedTimestamp);
+			audioManager.StartRecording(currentTimestampDir, sharedTimestamp);
 
-			audioFilePath = Path.Combine(currentTimestampDir, $"audio_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.mp4");
+			// Pass the audio file path to the global variable
+			audioFilePath = Path.Combine(currentTimestampDir, $"audio_{sharedTimestamp}.wav");
 
 			iconWatcher = new IconWatcher(baseDirectory, ffmpegManager);
 			iconWatcher.StartWatching();
@@ -193,12 +200,13 @@ namespace XeoClip
 
 			// Stop recording and merge audio-video
 			var clipTimestamps = iconWatcher?.GetBufferedTimestamps() ?? new List<DateTime>();
-			ffmpegManager?.StopRecording(audioFilePath ?? string.Empty, clipTimestamps);
+			ffmpegManager?.StopRecording(audioFilePath ?? string.Empty, sharedTimestamp ?? string.Empty, clipTimestamps);
 			audioManager?.StopRecording();
 			iconWatcher?.StopWatching();
 
 			Log("Recording stopped.");
 			currentTimestampDir = string.Empty;
+			sharedTimestamp = null;
 			Thread.Sleep(1000);
 		}
 
@@ -230,7 +238,7 @@ namespace XeoClip
 			try
 			{
 				var clipTimestamps = iconWatcher?.GetBufferedTimestamps() ?? new List<DateTime>();
-				ffmpegManager?.StopRecording(audioFilePath ?? string.Empty, clipTimestamps);
+				ffmpegManager?.StopRecording(audioFilePath ?? string.Empty, sharedTimestamp ?? string.Empty, clipTimestamps);
 				audioManager?.StopRecording();
 				iconWatcher?.StopWatching();
 			}
