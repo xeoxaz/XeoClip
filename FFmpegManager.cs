@@ -116,6 +116,8 @@ namespace XeoClip
 			}
 		}
 
+		private bool isMerging = false;
+
 		public async Task MergeAudioAndVideoAsync(string audioFilePath, string outputDir, string sharedTimestamp)
 		{
 			if (string.IsNullOrEmpty(videoFilePath))
@@ -134,7 +136,7 @@ namespace XeoClip
 			mergedFilePath = Path.Combine(outputDir ?? string.Empty, $"merged_{sharedTimestamp}.mp4");
 
 			// FFmpeg command to merge video and audio
-			string mergeCommand = $"{GetFFmpegPath()} -i \"{videoFilePath}\" -i \"{audioFilePath}\" -c:v copy -c:a aac \"{mergedFilePath}\"";
+			string mergeCommand = $"{GetFFmpegPath()} -i \"{videoFilePath}\" -i \"{audioFilePath}\" -c:v copy -c:a aac -shortest \"{mergedFilePath}\"";
 
 			Console.WriteLine("Merging video and audio...");
 			await Task.Run(() =>
@@ -142,9 +144,14 @@ namespace XeoClip
 				RunFFmpeg(mergeCommand);
 			});
 
+			// Ensure the merged file exists
 			if (File.Exists(mergedFilePath))
 			{
 				Console.WriteLine($"Merged file saved to: {mergedFilePath}");
+			}
+			else
+			{
+				Console.WriteLine("Failed to create merged file.");
 			}
 		}
 

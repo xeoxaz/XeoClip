@@ -227,17 +227,39 @@ namespace XeoClip
 				Log("Merging video and audio...");
 				await ffmpegManager.MergeAudioAndVideoAsync(audioFilePath, currentTimestampDir, sharedTimestamp ?? string.Empty);
 
-				// 5. Process timestamps and create clips
-				Log("Processing buffered timestamps...");
-				var mergedFilePath = ffmpegManager?.MergedFilePath;
-				if (!string.IsNullOrEmpty(mergedFilePath) && File.Exists(mergedFilePath))
+				// 5. Wait for merged file to exist before proceeding
+				string? mergedFilePath = ffmpegManager?.MergedFilePath;
+				if (!string.IsNullOrEmpty(mergedFilePath))
 				{
-					ffmpegManager?.CreateClipsFromTimestamps(clipTimestamps, currentTimestampDir, sharedTimestamp ?? string.Empty);
+					const int maxRetries = 10; // Number of retries
+					const int retryDelayMs = 500; // Delay between retries in milliseconds
+					bool mergedFileExists = false;
+
+					for (int i = 0; i < maxRetries; i++)
+					{
+						if (File.Exists(mergedFilePath))
+						{
+							mergedFileExists = true;
+							break;
+						}
+						await Task.Delay(retryDelayMs);
+					}
+
+					if (!mergedFileExists)
+					{
+						Log("Merged file not found after waiting. Aborting clip creation.");
+						return;
+					}
 				}
 				else
 				{
-					Log("No merged file found to create clips.");
+					Log("Merged file path is invalid. Aborting clip creation.");
+					return;
 				}
+
+				// 6. Process timestamps and create clips
+				Log("Processing buffered timestamps...");
+				ffmpegManager?.CreateClipsFromTimestamps(clipTimestamps, currentTimestampDir, sharedTimestamp ?? string.Empty);
 			}
 			catch (Exception ex)
 			{
